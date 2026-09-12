@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>I Hate Ads</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="I Hate Ads">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#17181A">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='38' fill='%2317181A'/%3E%3Crect x='68' y='55' width='44' height='95' rx='10' fill='none' stroke='%23ECECEE' stroke-width='6'/%3E%3Crect x='74' y='95' width='32' height='50' rx='4' fill='%234C8DFF'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg: #17181A;
+  --panel: #222327;
+  --border: #34353A;
+  --ink: #ECECEE;
+  --ink-dim: #8E8F94;
+  --accent: #4C8DFF;
+  --accent-ink: #FFFFFF;
+  --good: #3FBE72;
+}
+
+*{ box-sizing: border-box; }
+
+html, body{
+  margin:0; padding:0; min-height:100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.wrap{
+  max-width: 640px; margin: 0 auto;
+  padding: 28px 16px 40px;
+  display:flex; flex-direction:column; align-items:center;
+  min-height:100vh;
+}
+
+.title{
+  font-size: clamp(22px, 6vw, 28px);
+  font-weight: 700;
+  color: var(--ink);
+  margin: 4px 0 2px;
+  text-align:center;
+}
+.subtitle{
+  color: var(--ink-dim);
+  font-size: 13px;
+  margin-bottom: 20px;
+  text-align:center;
+}
+
+.hud{
+  width:100%;
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+.hud-stat{ text-align:center; flex:1; }
+.hud-stat .num{ font-weight:700; font-size:18px; color: var(--ink); display:block; line-height:1.1;}
+.hud-stat .lbl{ font-size:11px; color: var(--ink-dim); }
+.hud-div{ width:1px; height:26px; background: var(--border); }
+
+.controls{
+  display:flex; gap:8px; margin-bottom: 12px;
+  flex-wrap: wrap; justify-content:center;
+}
+.banner{
+  display:none;
+  width:100%;
+  background: rgba(230,159,58,0.12);
+  border: 1px solid rgba(230,159,58,0.4);
+  color: #E6A64E;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  text-align:center;
+  margin-bottom: 14px;
+}
+.banner.show{ display:block; }
+.btn{
+  font-family: inherit;
+  font-weight: 600; font-size:13px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 14px;
+  cursor:pointer;
+  transition: background .12s ease, transform .1s ease;
+}
+.btn:hover{ background: #2A2B30; }
+.btn:active{ transform: scale(0.97); }
+.btn.gold{
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.btn.gold:hover{ background: #3D77E0; }
+.btn:disabled{ opacity:.4; cursor:default; }
+
+.board{
+  display:flex; flex-wrap:wrap; justify-content:center;
+  gap: 16px 12px;
+  width:100%;
+  padding: 12px 0;
+}
+
+.bottle-slot{
+  display:flex; flex-direction:column; align-items:center;
+  cursor:pointer;
+  user-select:none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bottle{
+  position:relative;
+  width: 50px;
+  height: 164px;
+  border-radius: 8px 8px 18px 18px;
+  border: 2px solid var(--border);
+  background: var(--panel);
+  display:flex; flex-direction:column-reverse;
+  overflow:hidden;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+.bottle-slot.selected .bottle{
+  transform: translateY(-10px);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.bottle-slot.shake .bottle{
+  animation: shake .3s ease;
+}
+@keyframes shake{
+  0%,100%{ transform: translateX(0); }
+  25%{ transform: translateX(-5px); }
+  75%{ transform: translateX(5px); }
+}
+
+.segment{
+  width:100%;
+  flex: 0 0 auto;
+}
+
+.bottle-slot.solved .bottle{
+  box-shadow: 0 0 0 2px var(--good);
+}
+
+.bottle-slot.locked-slot .bottle{ opacity:.55; }
+.lock-icon{
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px;
+  background: rgba(0,0,0,0.35);
+  pointer-events:none;
+}
+.segment.key-seg{
+  background: #F1C40F;
+  display:flex; align-items:center; justify-content:center;
+  font-size:12px;
+}
+.bottle-slot .tag{
+  font-size: 10px;
+  color: var(--ink-dim);
+  margin-top: 4px;
+  text-align:center;
+}
+.key-icon{
+  font-size:18px;
+  pointer-events:none;
+}
+.bottle.giant{
+  border-color: var(--accent);
+  border-width: 3px;
+}
+.segment.mystery{
+  background: #3A3B40;
+  color: var(--ink-dim);
+  display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:700;
+  pointer-events:none;
+}
+
+.overlay{
+  position: fixed; inset:0; z-index: 50;
+  background: rgba(0,0,0,0.6);
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; pointer-events:none;
+  transition: opacity .2s ease;
+}
+.overlay.show{ opacity:1; pointer-events:auto; }
+.overlay-card{
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 26px;
+  text-align:center;
+  max-width: 300px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+  transform: scale(0.92);
+  transition: transform .2s ease;
+}
+.overlay.show .overlay-card{ transform: scale(1); }
+.overlay-card h2{
+  color: var(--ink);
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+}
+.overlay-card p{ color: var(--ink-dim); margin: 4px 0 20px; font-size:13px; }
+
+@media (max-width: 380px){
+  .bottle{ width: 42px; height: 144px; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="title">I Hate Ads</div>
+
+  <div class="hud">
+    <div class="hud-stat">
+      <span class="num" id="levelNum">1</span>
+      <span class="lbl">Level</span>
+    </div>
+    <div class="hud-div"></div>
+    <div class="hud-stat">
+      <span class="num" id="movesNum">0</span>
+      <span class="lbl">Moves</span>
+    </div>
+    <div class="hud-div"></div>
+    <div class="hud-stat">
+      <span class="num" id="colorsNum">3</span>
+      <span class="lbl">Colors</span>
+    </div>
+  </div>
+
+  <div class="banner" id="stuckBanner">This position can't be solved from here. Undo or add a bottle to keep going.</div>
+
+  <div class="controls">
+    <button class="btn" id="undoBtn">↺ Undo</button>
+    <button class="btn" id="addBottleBtn">+ Add Bottle</button>
+    <button class="btn" id="resetBtn">⟲ Restart</button>
+  </div>
+  <div class="controls">
+    <button class="btn" id="exportBtn">⇩ Save to Files</button>
+    <button class="btn" id="importBtn">⇧ Load Save</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none;">
+  </div>
+
+  <div class="board" id="board"></div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="overlay-card">
+    <h2 id="overlayTitle">Level Complete!</h2>
+    <p id="overlayText">Solved in 0 moves.</p>
+    <button class="btn gold" id="nextBtn">Next Level →</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const CAPACITY = 4;
+  const PALETTE = [
+    '#E74C3C', // red
+    '#E67E22', // orange
+    '#F1C40F', // gold
+    '#27AE60', // green
+    '#16A085', // teal
+    '#2E86DE', // blue
+    '#8E44AD', // purple
+    '#E84393', // pink
+    '#7F8C8D', // slate gray
+    '#2C3E50'  // navy
+  ];
+  const COLOR_NAMES = ['Red','Orange','Gold','Green','Teal','Blue','Purple','Pink','Slate','Navy'];
+
+  let level = 1;
+  let bottles = [];
+  let bottleCap = [];
+  let bottleLockedArr = [];
+  let bottleUnlockColor = [];
+  let colors = 3;
+  let selected = -1;
+  let moves = 0;
+  let history = [];
+  let gameLocked = false;
+  let revealedColors = [];
+
+  const board = document.getElementById('board');
+  const overlay = document.getElementById('overlay');
+  const levelNum = document.getElementById('levelNum');
+  const movesNum = document.getElementById('movesNum');
+  const colorsNum = document.getElementById('colorsNum');
+  const undoBtn = document.getElementById('undoBtn');
+  const addBottleBtn = document.getElementById('addBottleBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const stuckBanner = document.getElementById('stuckBanner');
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const importFile = document.getElementById('importFile');
+
+  // ---------- helpers ----------
+
+  function mkUnit(c, m){ return { c: c, m: !!m, key: false }; }
+  function mkKeyUnit(){ return { c: -1, m: false, key: true }; }
+
+  function shuffle(arr){
+    for(let i=arr.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i],arr[j]] = [arr[j],arr[i]];
+    }
+    return arr;
+  }
+
+  function cloneState(b){ return b.map(bt => bt.map(u => ({...u}))); }
+
+  function stateKey(b){
+    return b.map(bt => bt.map(u => u.key ? 'K' : u.c).join(',')).sort().join('|');
+  }
+
+  function isSolved(b){
+    const seen = new Set();
+    for(const bt of b){
+      if(bt.length===0) continue;
+      const top = bt[bt.length-1];
+      if(top.key) continue;
+      for(const u of bt){ if(u.c !== top.c) return false; }
+      if(seen.has(top.c)) return false;
+      seen.add(top.c);
+    }
+    return true;
+  }
+
+  function isColorComplete(b, colorIdx){
+    let foundBottle = -1;
+    for(let i=0;i<b.length;i++){
+      const bt = b[i];
+      if(bt.some(u => u.c === colorIdx)){
+        if(!bt.every(u => u.c === colorIdx)) return false;
+        if(foundBottle !== -1) return false;
+        foundBottle = i;
+      }
+    }
+    return foundBottle !== -1;
+  }
+
+  function getMoves(b, caps, lockedArr){
+    const mv = [];
+    for(let i=0;i<b.length;i++){
+      if(lockedArr && lockedArr[i]) continue;
+      if(b[i].length===0) continue;
+      const topUnit = b[i][b[i].length-1];
+      if(topUnit.key) continue;
+      for(let j=0;j<b.length;j++){
+        if(i===j) continue;
+        if(lockedArr && lockedArr[j]) continue;
+        const cap = caps ? caps[j] : CAPACITY;
+        if(b[j].length>=cap) continue;
+        if(b[j].length>0){
+          const destTop = b[j][b[j].length-1];
+          if(destTop.key) continue;
+          if(destTop.c !== topUnit.c) continue;
+        }
+        mv.push([i,j]);
+      }
+    }
+    return mv;
+  }
+
+  function applyMove(b, i, j, caps){
+    const nb = cloneState(b);
+    const from = nb[i], to = nb[j];
+    const topColor = from[from.length-1].c;
+    const cap = caps ? caps[j] : CAPACITY;
+    while(from.length>0 && from[from.length-1].c===topColor && !from[from.length-1].key && to.length<cap){
+      to.push(from.pop());
+    }
+    return nb;
+  }
+
+  function resolveKeys(b){
+    let changed = false;
+    const nb = b.map(bt => bt.slice());
+    for(let i=0;i<nb.length;i++){
+      if(nb[i].length>0 && nb[i][nb[i].length-1].key){
+        nb[i] = nb[i].slice(0,-1);
+        changed = true;
+      }
+    }
+    return changed ? nb : b;
+  }
+
+  function isSolvable(b, nodeCap, caps, lockedArr){
+    b = resolveKeys(b);
+    if(isSolved(b)) return true;
+    const visited = new Set([stateKey(b)]);
+    let queue = [b];
+    let explored = 0;
+    while(queue.length){
+      const next = [];
+      for(const state of queue){
+        const mvs = getMoves(state, caps, lockedArr);
+        for(const [i,j] of mvs){
+          let ns = applyMove(state, i, j, caps);
+          ns = resolveKeys(ns);
+          const key = stateKey(ns);
+          if(visited.has(key)) continue;
+          if(isSolved(ns)) return true;
+          visited.add(key);
+          next.push(ns);
+          explored++;
+          if(explored > nodeCap) return false;
+        }
+      }
+      queue = next;
+      if(queue.length===0) return false;
+    }
+    return false;
+  }
+
+  function levelParams(lvl){
+    let c = Math.min(3 + Math.floor((lvl-1)/2), 10);
+    let empty = lvl <= 10 ? 2 : 1;
+    if(empty === 1) c = Math.min(c, 8);
+    return { colors: c, empty };
+  }
+
+  function specialForLevel(lvl){
+    if(lvl < 3 || lvl % 3 !== 0) return null;
+    const cycle = Math.floor(lvl/3 - 1) % 4;
+    return ['giant','lockkey','mystery','colorlock'][cycle];
+  }
+
+  function generateLevel(lvl){
+    const { colors: nColors, empty } = levelParams(lvl);
+    const special = specialForLevel(lvl);
+    let giantColorIndex = -1;
+    if(special === 'giant'){
+      giantColorIndex = Math.floor(Math.random()*nColors);
+    }
+
+    function buildAttempt(){
+      if(special === 'giant'){
+        const preFill = CAPACITY;
+        const giantCap = CAPACITY*2;
+        const remainderGiant = giantCap - preFill;
+        const pool = [];
+        for(let c=0;c<nColors;c++){
+          if(c === giantColorIndex){
+            for(let k=0;k<remainderGiant;k++) pool.push(mkUnit(c));
+          } else {
+            for(let k=0;k<CAPACITY;k++) pool.push(mkUnit(c));
+          }
+        }
+        shuffle(pool);
+
+        const giantBottleContent = [];
+        for(let k=0;k<preFill;k++) giantBottleContent.push(mkUnit(giantColorIndex));
+
+        const b = [giantBottleContent];
+        const caps = [giantCap];
+        let idx = 0;
+        for(let s=0;s<nColors;s++){
+          b.push(pool.slice(idx, idx+CAPACITY));
+          caps.push(CAPACITY);
+          idx += CAPACITY;
+        }
+        for(let e=0;e<empty;e++){ b.push([]); caps.push(CAPACITY); }
+        const order = shuffle(b.map((_,i)=>i));
+        return { b: order.map(i=>b[i]), caps: order.map(i=>caps[i]) };
+      }
+
+      const units = [];
+      for(let c=0;c<nColors;c++){
+        for(let k=0;k<CAPACITY;k++) units.push(mkUnit(c));
+      }
+      shuffle(units);
+      const b = [];
+      const caps = [];
+      let idx = 0;
+      for(let c=0;c<nColors;c++){
+        b.push(units.slice(idx, idx+CAPACITY));
+        caps.push(CAPACITY);
+        idx += CAPACITY;
+      }
+      for(let e=0;e<empty;e++){ b.push([]); caps.push(CAPACITY); }
+      const order = shuffle(b.map((_,i)=>i));
+      return { b: order.map(i=>b[i]), caps: order.map(i=>caps[i]) };
+    }
+
+    let attempt = 0, result = null, capsResult = null;
+    while(attempt < 30 && !result){
+      attempt++;
+      const { b, caps } = buildAttempt();
+      if(isSolvable(b, 45000, caps)){
+        result = b;
+        capsResult = caps;
+      }
+    }
+    if(!result){
+      const { b, caps } = buildAttempt();
+      b.push([]); caps.push(CAPACITY);
+      result = b;
+      capsResult = caps;
+    }
+
+    let lockedArr = result.map(()=>false);
+    let unlockColorResult = result.map(()=>null);
+    let specialLabel = null;
+
+    if(special === 'giant'){
+      specialLabel = 'Giant vial! It already holds a start on one color — pour in more to fill it.';
+    } else if(special === 'lockkey'){
+      result.push([]); capsResult.push(CAPACITY); lockedArr.push(true); unlockColorResult.push(null);
+
+      const candidates = result.map((bt,i)=>bt.length>0?i:-1).filter(i=>i>=0);
+      let placed = false;
+      for(let tries=0; tries<15 && !placed; tries++){
+        const hostIdx = candidates[Math.floor(Math.random()*candidates.length)];
+        const trialBottles = cloneState(result);
+        const pos = Math.floor(Math.random()*trialBottles[hostIdx].length);
+        trialBottles[hostIdx][pos] = mkKeyUnit();
+        if(isSolvable(trialBottles, 45000, capsResult)){
+          result = trialBottles;
+          placed = true;
+        }
+      }
+      if(!placed){
+        const hostIdx = candidates[0];
+        result[hostIdx][0] = mkKeyUnit();
+      }
+      specialLabel = 'A key is buried in one of the vials — dig it out to open the locked one.';
+    } else if(special === 'mystery'){
+      const mysteryColor = Math.floor(Math.random()*nColors);
+      result.forEach(bt => bt.forEach(u => { if(u.c === mysteryColor) u.m = true; }));
+      specialLabel = 'Mystery color! It stays hidden until uncovered.';
+    } else if(special === 'colorlock'){
+      result.push([]); capsResult.push(CAPACITY); lockedArr.push(true);
+      const targetColor = Math.floor(Math.random()*nColors);
+      unlockColorResult.push(targetColor);
+      specialLabel = 'A locked vial appeared — finish sorting ' + COLOR_NAMES[targetColor] + ' to open it.';
+    }
+
+    colors = nColors;
+    return { bottles: result, caps: capsResult, lockedArr, unlockColor: unlockColorResult, specialLabel };
+  }
+
+  // ---------- persistence ----------
+
+  const SAVE_KEY = 'ihateads_save_v1';
+
+  function normalizeData(data){
+    if(!data || !Array.isArray(data.bottles)) return null;
+    data.bottles = data.bottles.map(bt => bt.map(u => (typeof u === 'number') ? mkUnit(u) : { revealed: false, ...u }));
+    if(!Array.isArray(data.caps) || data.caps.length !== data.bottles.length){
+      data.caps = data.bottles.map(()=>CAPACITY);
+    }
+    if(!Array.isArray(data.lockedArr) || data.lockedArr.length !== data.bottles.length){
+      data.lockedArr = data.bottles.map(()=>false);
+    }
+    if(!Array.isArray(data.unlockColor) || data.unlockColor.length !== data.bottles.length){
+      data.unlockColor = data.bottles.map(()=>null);
+    }
+    if(!Array.isArray(data.revealedColors)){
+      data.revealedColors = [];
+    }
+
+    // Safety: never leave a locked vial stuck with contents in it.
+    for(let i=0;i<data.bottles.length;i++){
+      if(data.lockedArr[i] && data.bottles[i].length > 0){
+        data.lockedArr[i] = false;
+      }
+    }
+    if(Array.isArray(data.history)){
+      data.history = data.history.map(h => {
+        if(Array.isArray(h)){
+          const migBottles = h.map(bt => bt.map(u => (typeof u === 'number') ? mkUnit(u) : u));
+          return { bottles: migBottles, caps: migBottles.map(()=>CAPACITY), lockedArr: migBottles.map(()=>false) };
+        }
+        return h;
+      });
+    } else {
+      data.history = [];
+    }
+    return data;
+  }
+
+  function saveGame(){
+    try{
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        level, bottles, colors, moves, history, caps: bottleCap, lockedArr: bottleLockedArr, unlockColor: bottleUnlockColor, revealedColors
+      }));
+    }catch(e){ /* storage unavailable, fail silently */ }
+  }
+
+  function loadGame(){
+    try{
+      const raw = localStorage.getItem(SAVE_KEY);
+      if(!raw) return null;
+      return normalizeData(JSON.parse(raw));
+    }catch(e){ return null; }
+  }
+
+  // ---------- game flow ----------
+
+  function startLevel(lvl, preserveState){
+    level = lvl;
+    if(preserveState){
+      bottles = preserveState.bottles;
+      colors = preserveState.colors;
+      moves = preserveState.moves;
+      history = preserveState.history || [];
+      bottleCap = preserveState.caps || bottles.map(()=>CAPACITY);
+      bottleLockedArr = preserveState.lockedArr || bottles.map(()=>false);
+      bottleUnlockColor = preserveState.unlockColor || bottles.map(()=>null);
+      revealedColors = preserveState.revealedColors || [];
+    } else {
+      const gen = generateLevel(lvl);
+      bottles = gen.bottles;
+      bottleCap = gen.caps;
+      bottleLockedArr = gen.lockedArr;
+      bottleUnlockColor = gen.unlockColor;
+      moves = 0;
+      history = [];
+      revealedColors = [];
+      if(gen.specialLabel){
+        const msg = gen.specialLabel;
+        setTimeout(()=> showToast(msg), 450);
+      }
+    }
+    selected = -1;
+    gameLocked = false;
+    levelNum.textContent = level;
+    movesNum.textContent = moves;
+    colorsNum.textContent = colors;
+    overlay.classList.remove('show');
+    render();
+    saveGame();
+  }
+
+  function checkStuck(){
+    if(isSolved(bottles)){ stuckBanner.classList.remove('show'); return false; }
+    const hasExposedKey = bottles.some(bt => bt.length>0 && bt[bt.length-1].key);
+    if(hasExposedKey){ stuckBanner.classList.remove('show'); return false; }
+    if(getMoves(bottles, bottleCap, bottleLockedArr).length === 0){
+      stuckBanner.classList.add('show');
+      return true;
+    }
+    const solvable = isSolvable(bottles, 60000, bottleCap, bottleLockedArr);
+    stuckBanner.classList.toggle('show', !solvable);
+    return !solvable;
+  }
+
+  function pushHistory(){
+    history.push({
+      bottles: cloneState(bottles),
+      caps: bottleCap.slice(),
+      lockedArr: bottleLockedArr.slice(),
+      unlockColor: bottleUnlockColor.slice()
+    });
+  }
+
+  function shakeBottle(i){
+    const slots = board.querySelectorAll('.bottle-slot');
+    if(slots[i]){
+      slots[i].classList.add('shake');
+      setTimeout(()=> slots[i] && slots[i].classList.remove('shake'), 320);
+    }
+  }
+
+  function checkColorLocks(){
+    let unlocked = false;
+    for(let i=0;i<bottleUnlockColor.length;i++){
+      const target = bottleUnlockColor[i];
+      if(target !== null && bottleLockedArr[i] && isColorComplete(bottles, target)){
+        bottleLockedArr[i] = false;
+        bottleUnlockColor[i] = null;
+        unlocked = true;
+      }
+    }
+    if(unlocked){
+      showToast('Color complete — vial unlocked!');
+      saveGame();
+    }
+    return unlocked;
+  }
+
+  function render(){
+    checkColorLocks();
+    board.innerHTML = '';
+    bottles.forEach((b, idx) => {
+      const cap = bottleCap[idx] || CAPACITY;
+      const isLockedBottle = !!bottleLockedArr[idx];
+      const unlockTarget = bottleUnlockColor[idx];
+
+      const slot = document.createElement('div');
+      slot.className = 'bottle-slot';
+      if(idx === selected) slot.classList.add('selected');
+      if(isLockedBottle) slot.classList.add('locked-slot');
+      const isUniform = b.length>0 && !b[0].key && b.every(u=>u.c===b[0].c);
+      if(isUniform && !isLockedBottle) slot.classList.add('solved');
+
+      const bottleEl = document.createElement('div');
+      bottleEl.className = 'bottle';
+      bottleEl.style.height = Math.round(41*cap) + 'px';
+      if(cap > CAPACITY) bottleEl.classList.add('giant');
+
+      b.forEach((u, ui) => {
+        const seg = document.createElement('div');
+        seg.className = 'segment';
+        seg.style.height = (100/cap) + '%';
+        const isTop = ui === b.length-1;
+        if(u.key){
+          seg.classList.add('key-seg');
+          seg.textContent = '🔑';
+        } else if(u.m && isTop && !revealedColors.includes(u.c)){
+          revealedColors.push(u.c);
+        }
+        if(!u.key){
+          const hidden = u.m && !revealedColors.includes(u.c);
+          if(hidden){
+            seg.classList.add('mystery');
+            seg.textContent = '?';
+          } else {
+            seg.style.background = PALETTE[((u.c % PALETTE.length)+PALETTE.length)%PALETTE.length];
+          }
+        }
+        bottleEl.appendChild(seg);
+      });
+
+      if(isLockedBottle){
+        const lockIcon = document.createElement('div');
+        lockIcon.className = 'lock-icon';
+        lockIcon.textContent = '🔒';
+        bottleEl.appendChild(lockIcon);
+      }
+
+      slot.appendChild(bottleEl);
+
+      if(isLockedBottle){
+        const tag = document.createElement('div');
+        tag.className = 'tag';
+        if(unlockTarget !== null){
+          tag.innerHTML = 'Finish <span style="color:'+PALETTE[unlockTarget]+';font-weight:700;">' + COLOR_NAMES[unlockTarget] + '</span>';
+        } else {
+          tag.textContent = 'Locked';
+        }
+        slot.appendChild(tag);
+      }
+
+      slot.addEventListener('click', () => handleClick(idx));
+      board.appendChild(slot);
+    });
+    checkStuck();
+  }
+
+  function useKey(idx){
+    if(gameLocked) return;
+    const lockIdx = bottleLockedArr.findIndex(v => v);
+    pushHistory();
+    bottles[idx] = bottles[idx].slice(0, -1);
+    if(lockIdx !== -1){
+      bottleLockedArr[lockIdx] = false;
+      showToast('Key collected — vial unlocked!');
+    } else {
+      showToast('Key collected!');
+    }
+    selected = -1;
+    render();
+    saveGame();
+  }
+
+  function handleClick(idx){
+    if(gameLocked) return;
+    const bottle = bottles[idx];
+    const topUnit = bottle.length>0 ? bottle[bottle.length-1] : null;
+
+    if(topUnit && topUnit.key){ useKey(idx); return; }
+
+    if(bottleLockedArr[idx]){
+      shakeBottle(idx);
+      showToast('Locked — find the key first');
+      return;
+    }
+
+    if(selected === -1){
+      if(bottle.length === 0) return;
+      selected = idx;
+      render();
+      return;
+    }
+    if(selected === idx){
+      selected = -1;
+      render();
+      return;
+    }
+
+    const from = bottles[selected], to = bottles[idx];
+    const cap = bottleCap[idx] || CAPACITY;
+    const canPour = from.length>0 && !from[from.length-1].key && to.length<cap &&
+      (to.length===0 || (!to[to.length-1].key && to[to.length-1].c===from[from.length-1].c));
+
+    if(canPour){
+      pushHistory();
+      bottles = applyMove(bottles, selected, idx, bottleCap);
+      moves++;
+      movesNum.textContent = moves;
+      selected = -1;
+      render();
+      saveGame();
+      if(isSolved(bottles)){
+        gameLocked = true;
+        setTimeout(showWin, 350);
+      }
+    } else {
+      const prevSel = selected;
+      const destUsable = bottle.length > 0 && !bottleLockedArr[idx] && !(bottle[bottle.length-1].key);
+      if(destUsable){
+        selected = idx;
+        render();
+      } else {
+        selected = -1;
+        render();
+      }
+      shakeBottle(prevSel);
+    }
+  }
+
+  function showWin(){
+    document.getElementById('overlayTitle').textContent = 'Level ' + level + ' complete';
+    document.getElementById('overlayText').textContent = 'Solved in ' + moves + ' move' + (moves===1?'':'s') + '.';
+    overlay.classList.add('show');
+  }
+
+  function showToast(msg){
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;bottom:28px;left:50%;transform:translateX(-50%);'+
+      'background:#2E2F34;color:#ECECEE;'+
+      'padding:10px 18px;border-radius:10px;font-family:inherit;'+
+      'font-size:13px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);'+
+      'opacity:0;transition:opacity .25s ease;max-width:80vw;text-align:center;';
+    document.body.appendChild(t);
+    requestAnimationFrame(()=> t.style.opacity='1');
+    setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(), 300); }, 2600);
+  }
+
+  // ---------- controls ----------
+
+  exportBtn.addEventListener('click', () => {
+    const data = { level, bottles, colors, moves, history, caps: bottleCap, lockedArr: bottleLockedArr, unlockColor: bottleUnlockColor, revealedColors, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'i-hate-ads-save.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 1000);
+    showToast('Save file downloaded');
+  });
+
+  importBtn.addEventListener('click', () => importFile.click());
+
+  importFile.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try{
+        const data = normalizeData(JSON.parse(reader.result));
+        if(!data) throw new Error('bad file');
+        startLevel(data.level, data);
+        showToast('Save loaded — Level ' + data.level);
+      }catch(err){
+        showToast('Could not read that save file');
+      }
+    };
+    reader.readAsText(file);
+    importFile.value = '';
+  });
+
+  addBottleBtn.addEventListener('click', () => {
+    if(gameLocked) return;
+    pushHistory();
+    bottles.push([]);
+    bottleCap.push(CAPACITY);
+    bottleLockedArr.push(false);
+    bottleUnlockColor.push(null);
+    selected = -1;
+    render();
+    saveGame();
+    showToast('Empty vial added');
+  });
+
+  undoBtn.addEventListener('click', () => {
+    if(gameLocked || history.length===0) return;
+    const prev = history.pop();
+    bottles = prev.bottles;
+    bottleCap = prev.caps;
+    bottleLockedArr = prev.lockedArr;
+    bottleUnlockColor = prev.unlockColor || bottleUnlockColor;
+    moves = Math.max(0, moves-1);
+    movesNum.textContent = moves;
+    selected = -1;
+    render();
+    saveGame();
+  });
+
+  resetBtn.addEventListener('click', () => startLevel(level));
+  nextBtn.addEventListener('click', () => startLevel(level+1));
+
+  const saved = loadGame();
+  if(saved){
+    startLevel(saved.level, saved);
+  } else {
+    startLevel(1);
+  }
+})();
+</script>
+
+</body>
+</html>
