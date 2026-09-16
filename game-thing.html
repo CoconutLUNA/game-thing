@@ -269,32 +269,22 @@ html, body{
 
 <script>
 (function(){
-  const CAPACITY = 4;
-  const PALETTE = [
-    '#E74C3C', // red
-    '#E67E22', // orange
-    '#F1C40F', // gold
-    '#27AE60', // green
-    '#16A085', // teal
-    '#2E86DE', // blue
-    '#8E44AD', // purple
-    '#E84393', // pink
-    '#7F8C8D', // slate gray
-    '#2C3E50'  // navy
-  ];
-  const COLOR_NAMES = ['Red','Orange','Gold','Green','Teal','Blue','Purple','Pink','Slate','Navy'];
+  const CAP = 4;
+  const PALETTE = ['#E74C3C','#E67E22','#F1C40F','#27AE60','#16A085','#2E86DE','#8E44AD','#E84393','#7F8C8D','#2C3E50'];
+  const NAMES = ['Red','Orange','Gold','Green','Teal','Blue','Purple','Pink','Slate','Navy'];
+  const SAVE_KEY = 'ihateads_save_v2';
 
   let level = 1;
   let bottles = [];
-  let bottleCap = [];
-  let bottleLockedArr = [];
-  let bottleUnlockColor = [];
+  let caps = [];
+  let locked = [];
+  let needColor = [];
   let colors = 3;
   let selected = -1;
   let moves = 0;
   let history = [];
-  let gameLocked = false;
-  let revealedColors = [];
+  let won = false;
+  let solveCache = new Map();
 
   const board = document.getElementById('board');
   const overlay = document.getElementById('overlay');
@@ -310,625 +300,647 @@ html, body{
   const importBtn = document.getElementById('importBtn');
   const importFile = document.getElementById('importFile');
 
-  // ---------- helpers ----------
+  function unit(c){ return { c: c, m: false, r: false, k: false }; }
+  function keyUnit(){ return { c: -1, m: false, r: true, k: true }; }
 
-  function mkUnit(c, m){ return { c: c, m: !!m, key: false }; }
-  function mkKeyUnit(){ return { c: -1, m: false, key: true }; }
-
-  function shuffle(arr){
-    for(let i=arr.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
-      [arr[i],arr[j]] = [arr[j],arr[i]];
+  function shuffle(a){
+    for(let i=a.length-1;i>0;i--){
+      const j = (Math.random()*(i+1))|0;
+      const t = a[i]; a[i] = a[j]; a[j] = t;
     }
-    return arr;
+    return a;
   }
 
-  function cloneState(b){ return b.map(bt => bt.map(u => ({...u}))); }
-
-  function stateKey(b){
-    return b.map(bt => bt.map(u => u.key ? 'K' : u.c).join(',')).sort().join('|');
+  function cloneB(b){
+    const out = new Array(b.length);
+    for(let i=0;i<b.length;i++){
+      const src = b[i], dst = new Array(src.length);
+      for(let j=0;j<src.length;j++){
+        const u = src[j];
+        dst[j] = { c: u.c, m: u.m, r: u.r, k: u.k };
+      }
+      out[i] = dst;
+    }
+    return out;
   }
 
-  function isSolved(b){
-    const seen = new Set();
-    for(const bt of b){
-      if(bt.length===0) continue;
-      const top = bt[bt.length-1];
-      if(top.key) continue;
-      for(const u of bt){ if(u.c !== top.c) return false; }
-      if(seen.has(top.c)) return false;
-      seen.add(top.c);
+  function sig(b, lk){
+    let s = '';
+    for(let i=0;i<b.length;i++){
+      const bt = b[i];
+      for(let j=0;j<bt.length;j++) s += (bt[j].k ? 'K' : bt[j].c) + '.';
+      s += lk[i] ? '#' : '|';
+    }
+    return s;
+  }
+
+  function solved(b, lk){
+    const seen = {};
+    for(let i=0;i<b.length;i++){
+      if(lk[i]) return false;
+      const bt = b[i];
+      if(bt.length === 0) continue;
+      const c = bt[0].c;
+      if(bt[0].k) return false;
+      for(let j=1;j<bt.length;j++) if(bt[j].c !== c) return false;
+      if(seen[c]) return false;
+      seen[c] = 1;
     }
     return true;
   }
 
-  function isColorComplete(b, colorIdx){
-    let foundBottle = -1;
+  function colorDone(b, c){
+    let found = -1;
     for(let i=0;i<b.length;i++){
       const bt = b[i];
-      if(bt.some(u => u.c === colorIdx)){
-        if(!bt.every(u => u.c === colorIdx)) return false;
-        if(foundBottle !== -1) return false;
-        foundBottle = i;
+      let has = false, pure = true;
+      for(let j=0;j<bt.length;j++){
+        if(bt[j].c === c) has = true; else pure = false;
+      }
+      if(has){
+        if(!pure || found !== -1) return false;
+        found = i;
       }
     }
-    return foundBottle !== -1;
+    return found !== -1;
   }
 
-  function getMoves(b, caps, lockedArr){
+  function settle(b, lk, need){
+    let nb = b, nl = lk, changed = false;
+    for(let i=0;i<nb.length;i++){
+      const bt = nb[i];
+      if(bt.length && bt[bt.length-1].k){
+        if(!changed){ nb = cloneB(b); nl = lk.slice(); changed = true; }
+        nb[i] = nb[i].slice(0, -1);
+        for(let q=0;q<nl.length;q++) if(nl[q] && need[q] === null) nl[q] = false;
+      }
+    }
+    for(let i=0;i<nl.length;i++){
+      if(nl[i] && need[i] !== null && colorDone(nb, need[i])){
+        if(!changed){ nb = cloneB(b); nl = lk.slice(); changed = true; }
+        nl[i] = false;
+      }
+    }
+    return changed ? { b: nb, lk: nl } : { b: b, lk: lk };
+  }
+
+  function moveList(b, cp, lk){
     const mv = [];
     for(let i=0;i<b.length;i++){
-      if(lockedArr && lockedArr[i]) continue;
-      if(b[i].length===0) continue;
-      const topUnit = b[i][b[i].length-1];
-      if(topUnit.key) continue;
+      if(lk[i] || b[i].length === 0) continue;
+      const top = b[i][b[i].length-1];
+      if(top.k) continue;
+      let run = 1;
+      for(let q=b[i].length-2;q>=0 && !b[i][q].k && b[i][q].c===top.c;q--) run++;
+      if(run === b[i].length && b[i].length > 0){
+        let onlyColor = true;
+        for(let q=0;q<b[i].length;q++) if(b[i][q].c !== top.c) onlyColor = false;
+        if(onlyColor && b[i].length === cp[i]) continue;
+      }
       for(let j=0;j<b.length;j++){
-        if(i===j) continue;
-        if(lockedArr && lockedArr[j]) continue;
-        const cap = caps ? caps[j] : CAPACITY;
-        if(b[j].length>=cap) continue;
-        if(b[j].length>0){
-          const destTop = b[j][b[j].length-1];
-          if(destTop.key) continue;
-          if(destTop.c !== topUnit.c) continue;
-        }
+        if(i === j || lk[j] || b[j].length >= cp[j]) continue;
+        if(b[j].length){
+          const d = b[j][b[j].length-1];
+          if(d.k || d.c !== top.c) continue;
+        } else if(run === b[i].length) continue;
         mv.push([i,j]);
       }
     }
     return mv;
   }
 
-  function applyMove(b, i, j, caps){
-    const nb = cloneState(b);
-    const from = nb[i], to = nb[j];
-    const topColor = from[from.length-1].c;
-    const cap = caps ? caps[j] : CAPACITY;
-    while(from.length>0 && from[from.length-1].c===topColor && !from[from.length-1].key && to.length<cap){
-      to.push(from.pop());
-    }
+  function pour(b, i, j, cp){
+    const nb = cloneB(b);
+    const f = nb[i], t = nb[j];
+    const c = f[f.length-1].c;
+    while(f.length && !f[f.length-1].k && f[f.length-1].c === c && t.length < cp[j]) t.push(f.pop());
     return nb;
   }
 
-  function resolveKeys(b){
-    let changed = false;
-    const nb = b.map(bt => bt.slice());
-    for(let i=0;i<nb.length;i++){
-      if(nb[i].length>0 && nb[i][nb[i].length-1].key){
-        nb[i] = nb[i].slice(0,-1);
-        changed = true;
-      }
-    }
-    return changed ? nb : b;
-  }
-
-  function isSolvable(b, nodeCap, caps, lockedArr){
-    b = resolveKeys(b);
-    if(isSolved(b)) return true;
-    const visited = new Set([stateKey(b)]);
-    let queue = [b];
-    let explored = 0;
-    while(queue.length){
+  function solvable(b, lk, cp, need, budget){
+    let st = settle(b, lk, need);
+    if(solved(st.b, st.lk)) return true;
+    const seen = new Set([sig(st.b, st.lk)]);
+    let frontier = [st];
+    let n = 0;
+    while(frontier.length){
       const next = [];
-      for(const state of queue){
-        const mvs = getMoves(state, caps, lockedArr);
-        for(const [i,j] of mvs){
-          let ns = applyMove(state, i, j, caps);
-          ns = resolveKeys(ns);
-          const key = stateKey(ns);
-          if(visited.has(key)) continue;
-          if(isSolved(ns)) return true;
-          visited.add(key);
-          next.push(ns);
-          explored++;
-          if(explored > nodeCap) return false;
+      for(let f=0;f<frontier.length;f++){
+        const cur = frontier[f];
+        const mv = moveList(cur.b, cp, cur.lk);
+        for(let m=0;m<mv.length;m++){
+          const nb = pour(cur.b, mv[m][0], mv[m][1], cp);
+          const s2 = settle(nb, cur.lk, need);
+          const k = sig(s2.b, s2.lk);
+          if(seen.has(k)) continue;
+          if(solved(s2.b, s2.lk)) return true;
+          seen.add(k);
+          next.push(s2);
+          if(++n > budget) return null;
         }
       }
-      queue = next;
-      if(queue.length===0) return false;
+      frontier = next;
     }
     return false;
   }
 
-  function levelParams(lvl){
-    let c = Math.min(3 + Math.floor((lvl-1)/2), 10);
-    let empty = lvl <= 10 ? 2 : 1;
-    if(empty === 1) c = Math.min(c, 8);
-    return { colors: c, empty };
-  }
-
-  function specialForLevel(lvl){
+  function specialFor(lvl){
     if(lvl < 3 || lvl % 3 !== 0) return null;
-    const cycle = Math.floor(lvl/3 - 1) % 4;
-    return ['giant','lockkey','mystery','colorlock'][cycle];
+    return ['giant','lockkey','mystery','colorlock'][((lvl/3 - 1) % 4)|0];
   }
 
-  function generateLevel(lvl){
-    const { colors: nColors, empty } = levelParams(lvl);
-    const special = specialForLevel(lvl);
-    let giantColorIndex = -1;
-    if(special === 'giant'){
-      giantColorIndex = Math.floor(Math.random()*nColors);
-    }
+  function params(lvl){
+    let c = Math.min(3 + (((lvl-1)/2)|0), 10);
+    let e = lvl <= 10 ? 2 : 1;
+    if(e === 1) c = Math.min(c, 8);
+    return { n: c, e: e };
+  }
 
-    function buildAttempt(){
-      if(special === 'giant'){
-        const preFill = CAPACITY;
-        const giantCap = CAPACITY*2;
-        const remainderGiant = giantCap - preFill;
-        const pool = [];
-        for(let c=0;c<nColors;c++){
-          if(c === giantColorIndex){
-            for(let k=0;k<remainderGiant;k++) pool.push(mkUnit(c));
-          } else {
-            for(let k=0;k<CAPACITY;k++) pool.push(mkUnit(c));
+  function runLen(bt){
+    const c = bt[bt.length-1].c;
+    let r = 1;
+    for(let q=bt.length-2; q>=0 && bt[q].c===c; q--) r++;
+    return r;
+  }
+
+  function scramble(b, cp, steps, pureIdx, pureColor){
+    for(let s=0; s<steps; s++){
+      const cand = [];
+      for(let j=0;j<b.length;j++){
+        if(!b[j].length) continue;
+        const c = b[j][b[j].length-1].c;
+        const r = runLen(b[j]);
+        for(let t=1;t<=r;t++){
+          if(!(t < r || b[j].length === t)) continue;
+          for(let i=0;i<b.length;i++){
+            if(i === j) continue;
+            if(b[i].length + t > cp[i]) continue;
+            if(b[i].length && b[i][b[i].length-1].c === c) continue;
+            if(i === pureIdx && c !== pureColor) continue;
+            cand.push([j,i,t]);
           }
         }
-        shuffle(pool);
-
-        const giantBottleContent = [];
-        for(let k=0;k<preFill;k++) giantBottleContent.push(mkUnit(giantColorIndex));
-
-        const b = [giantBottleContent];
-        const caps = [giantCap];
-        let idx = 0;
-        for(let s=0;s<nColors;s++){
-          b.push(pool.slice(idx, idx+CAPACITY));
-          caps.push(CAPACITY);
-          idx += CAPACITY;
-        }
-        for(let e=0;e<empty;e++){ b.push([]); caps.push(CAPACITY); }
-        const order = shuffle(b.map((_,i)=>i));
-        return { b: order.map(i=>b[i]), caps: order.map(i=>caps[i]) };
       }
-
-      const units = [];
-      for(let c=0;c<nColors;c++){
-        for(let k=0;k<CAPACITY;k++) units.push(mkUnit(c));
-      }
-      shuffle(units);
-      const b = [];
-      const caps = [];
-      let idx = 0;
-      for(let c=0;c<nColors;c++){
-        b.push(units.slice(idx, idx+CAPACITY));
-        caps.push(CAPACITY);
-        idx += CAPACITY;
-      }
-      for(let e=0;e<empty;e++){ b.push([]); caps.push(CAPACITY); }
-      const order = shuffle(b.map((_,i)=>i));
-      return { b: order.map(i=>b[i]), caps: order.map(i=>caps[i]) };
+      if(!cand.length) break;
+      const m = cand[(Math.random()*cand.length)|0];
+      const from = b[m[0]], to = b[m[1]];
+      for(let t=0;t<m[2];t++) to.push(from.pop());
     }
+    return b;
+  }
 
-    let attempt = 0, result = null, capsResult = null;
-    while(attempt < 30 && !result){
-      attempt++;
-      const { b, caps } = buildAttempt();
-      if(isSolvable(b, 45000, caps)){
-        result = b;
-        capsResult = caps;
-      }
+  function freshBoard(n, e, giantColor, extra){
+    const b = [], cp = [];
+    let pureIdx = -1;
+    if(giantColor >= 0){
+      const g = [];
+      for(let k=0;k<CAP*2;k++) g.push(unit(giantColor));
+      pureIdx = 0;
+      b.push(g); cp.push(CAP*2);
     }
-    if(!result){
-      const { b, caps } = buildAttempt();
-      b.push([]); caps.push(CAPACITY);
-      result = b;
-      capsResult = caps;
+    for(let c=0;c<n;c++){
+      if(c === giantColor) continue;
+      const bt = [];
+      for(let k=0;k<CAP;k++) bt.push(unit(c));
+      b.push(bt); cp.push(CAP);
     }
+    for(let i=0;i<e+extra;i++){ b.push([]); cp.push(CAP); }
+    scramble(b, cp, 60 + n*25, pureIdx, giantColor);
+    return { b: b, cp: cp, pureIdx: pureIdx };
+  }
 
-    let lockedArr = result.map(()=>false);
-    let unlockColorResult = result.map(()=>null);
-    let specialLabel = null;
+  function permute(g){
+    const order = shuffle(g.b.map((_,i)=>i));
+    const map = {};
+    for(let i=0;i<order.length;i++) map[order[i]] = i;
+    return {
+      b: order.map(i=>g.b[i]),
+      cp: order.map(i=>g.cp[i]),
+      lk: order.map(i=>g.lk[i]),
+      need: order.map(i=>g.need[i]),
+      pureIdx: g.pureIdx >= 0 ? map[g.pureIdx] : -1
+    };
+  }
+
+  function build(lvl){
+    const p = params(lvl);
+    const n = p.n;
+    const special = specialFor(lvl);
+    let label = null;
 
     if(special === 'giant'){
-      specialLabel = 'Giant vial! It already holds a start on one color — pour in more to fill it.';
-    } else if(special === 'lockkey'){
-      result.push([]); capsResult.push(CAPACITY); lockedArr.push(true); unlockColorResult.push(null);
+      const g = (Math.random()*n)|0;
+      let f = null;
+      for(let a=0;a<25 && !f;a++){
+        const t = freshBoard(n, p.e, g, 0);
+        if(t.b[t.pureIdx].length >= CAP) f = t;
+      }
+      if(!f) f = freshBoard(n, p.e, g, 1);
+      f.lk = f.b.map(()=>false);
+      f.need = f.b.map(()=>null);
+      colors = n;
+      const r = permute(f);
+      return { b: r.b, cp: r.cp, lk: r.lk, need: r.need,
+        label: 'Giant vial! It holds double — fill it with ' + NAMES[g] + '.' };
+    }
 
-      const candidates = result.map((bt,i)=>bt.length>0?i:-1).filter(i=>i>=0);
-      let placed = false;
-      for(let tries=0; tries<15 && !placed; tries++){
-        const hostIdx = candidates[Math.floor(Math.random()*candidates.length)];
-        const trialBottles = cloneState(result);
-        const pos = Math.floor(Math.random()*trialBottles[hostIdx].length);
-        trialBottles[hostIdx][pos] = mkKeyUnit();
-        if(isSolvable(trialBottles, 45000, capsResult)){
-          result = trialBottles;
-          placed = true;
+    if(special === 'lockkey' || special === 'colorlock'){
+      for(let a=0; a<30; a++){
+        const f = freshBoard(n, p.e, -1, 1);
+        const lk = f.b.map(()=>false);
+        const need = f.b.map(()=>null);
+
+        const filled = [];
+        for(let i=0;i<f.b.length;i++) if(f.b[i].length > 0) filled.push(i);
+        if(!filled.length) continue;
+        const L = filled[(Math.random()*filled.length)|0];
+
+        if(special === 'lockkey'){
+          const hosts = [];
+          for(let i=0;i<f.b.length;i++) if(i !== L && f.b[i].length < f.cp[i]) hosts.push(i);
+          if(!hosts.length) continue;
+          const H = hosts[(Math.random()*hosts.length)|0];
+          const pos = (Math.random()*(f.b[H].length+1))|0;
+          f.b[H].splice(pos, 0, keyUnit());
+          lk[L] = true;
+          label = 'A key is buried in a vial — dig it out to open the locked one.';
+        } else {
+          const inL = {};
+          for(let j=0;j<f.b[L].length;j++) inL[f.b[L][j].c] = 1;
+          const opts = [];
+          for(let c=0;c<n;c++) if(!inL[c]) opts.push(c);
+          if(!opts.length) continue;
+          const target = opts[(Math.random()*opts.length)|0];
+          lk[L] = true;
+          need[L] = target;
+          label = 'Locked vial — finish ' + NAMES[target] + ' to open it.';
+        }
+
+        f.lk = lk; f.need = need;
+        if(solvable(f.b, f.lk, f.cp, f.need, 40000) === true){
+          colors = n;
+          const r = permute(f);
+          return { b: r.b, cp: r.cp, lk: r.lk, need: r.need, label: label };
         }
       }
-      if(!placed){
-        const hostIdx = candidates[0];
-        result[hostIdx][0] = mkKeyUnit();
-      }
-      specialLabel = 'A key is buried in one of the vials — dig it out to open the locked one.';
-    } else if(special === 'mystery'){
-      const mysteryColor = Math.floor(Math.random()*nColors);
-      result.forEach(bt => bt.forEach(u => { if(u.c === mysteryColor) u.m = true; }));
-      specialLabel = 'Mystery color! It stays hidden until uncovered.';
-    } else if(special === 'colorlock'){
-      result.push([]); capsResult.push(CAPACITY); lockedArr.push(true);
-      const targetColor = Math.floor(Math.random()*nColors);
-      unlockColorResult.push(targetColor);
-      specialLabel = 'A locked vial appeared — finish sorting ' + COLOR_NAMES[targetColor] + ' to open it.';
     }
 
-    colors = nColors;
-    return { bottles: result, caps: capsResult, lockedArr, unlockColor: unlockColorResult, specialLabel };
+    const f = freshBoard(n, p.e, -1, 0);
+    f.lk = f.b.map(()=>false);
+    f.need = f.b.map(()=>null);
+    if(special === 'mystery'){
+      const mc = (Math.random()*n)|0;
+      for(let i=0;i<f.b.length;i++) for(let j=0;j<f.b[i].length;j++) if(f.b[i][j].c === mc) f.b[i][j].m = true;
+      label = 'Mystery color — each drop stays hidden until it surfaces.';
+    }
+    colors = n;
+    const r = permute(f);
+    return { b: r.b, cp: r.cp, lk: r.lk, need: r.need, label: label };
   }
 
-  // ---------- persistence ----------
-
-  const SAVE_KEY = 'ihateads_save_v1';
-
-  function normalizeData(data){
-    if(!data || !Array.isArray(data.bottles)) return null;
-    data.bottles = data.bottles.map(bt => bt.map(u => (typeof u === 'number') ? mkUnit(u) : { revealed: false, ...u }));
-    if(!Array.isArray(data.caps) || data.caps.length !== data.bottles.length){
-      data.caps = data.bottles.map(()=>CAPACITY);
-    }
-    if(!Array.isArray(data.lockedArr) || data.lockedArr.length !== data.bottles.length){
-      data.lockedArr = data.bottles.map(()=>false);
-    }
-    if(!Array.isArray(data.unlockColor) || data.unlockColor.length !== data.bottles.length){
-      data.unlockColor = data.bottles.map(()=>null);
-    }
-    if(!Array.isArray(data.revealedColors)){
-      data.revealedColors = [];
-    }
-
-    // Safety: never leave a locked vial stuck with contents in it.
-    for(let i=0;i<data.bottles.length;i++){
-      if(data.lockedArr[i] && data.bottles[i].length > 0){
-        data.lockedArr[i] = false;
-      }
-    }
-    if(Array.isArray(data.history)){
-      data.history = data.history.map(h => {
-        if(Array.isArray(h)){
-          const migBottles = h.map(bt => bt.map(u => (typeof u === 'number') ? mkUnit(u) : u));
-          return { bottles: migBottles, caps: migBottles.map(()=>CAPACITY), lockedArr: migBottles.map(()=>false) };
-        }
-        return h;
-      });
-    } else {
-      data.history = [];
-    }
-    return data;
-  }
-
-  function saveGame(){
+  function save(){
     try{
-      localStorage.setItem(SAVE_KEY, JSON.stringify({
-        level, bottles, colors, moves, history, caps: bottleCap, lockedArr: bottleLockedArr, unlockColor: bottleUnlockColor, revealedColors
-      }));
-    }catch(e){ /* storage unavailable, fail silently */ }
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ level, bottles, caps, locked, needColor, colors, moves, history }));
+    }catch(e){}
   }
 
-  function loadGame(){
+  function normalize(d){
+    if(!d || !Array.isArray(d.bottles)) return null;
+    const len = d.bottles.length;
+    d.bottles = d.bottles.map(bt => bt.map(u =>
+      (typeof u === 'number') ? unit(u) : { c: u.c, m: !!u.m, r: !!u.r, k: !!u.k }
+    ));
+    if(!Array.isArray(d.caps) || d.caps.length !== len) d.caps = d.bottles.map(()=>CAP);
+    if(!Array.isArray(d.locked) || d.locked.length !== len) d.locked = d.bottles.map(()=>false);
+    if(!Array.isArray(d.needColor) || d.needColor.length !== len) d.needColor = d.bottles.map(()=>null);
+    if(!Array.isArray(d.history)) d.history = [];
+    d.history = d.history.filter(h => h && Array.isArray(h.bottles));
+    if(typeof d.level !== 'number') d.level = 1;
+    if(typeof d.moves !== 'number') d.moves = 0;
+    if(typeof d.colors !== 'number') d.colors = 3;
+    return d;
+  }
+
+  function load(){
     try{
       const raw = localStorage.getItem(SAVE_KEY);
-      if(!raw) return null;
-      return normalizeData(JSON.parse(raw));
+      return raw ? normalize(JSON.parse(raw)) : null;
     }catch(e){ return null; }
   }
 
-  // ---------- game flow ----------
-
-  function startLevel(lvl, preserveState){
+  function start(lvl, state){
     level = lvl;
-    if(preserveState){
-      bottles = preserveState.bottles;
-      colors = preserveState.colors;
-      moves = preserveState.moves;
-      history = preserveState.history || [];
-      bottleCap = preserveState.caps || bottles.map(()=>CAPACITY);
-      bottleLockedArr = preserveState.lockedArr || bottles.map(()=>false);
-      bottleUnlockColor = preserveState.unlockColor || bottles.map(()=>null);
-      revealedColors = preserveState.revealedColors || [];
+    solveCache = new Map();
+    if(state){
+      bottles = state.bottles;
+      caps = state.caps;
+      locked = state.locked;
+      needColor = state.needColor;
+      colors = state.colors;
+      moves = state.moves;
+      history = state.history;
     } else {
-      const gen = generateLevel(lvl);
-      bottles = gen.bottles;
-      bottleCap = gen.caps;
-      bottleLockedArr = gen.lockedArr;
-      bottleUnlockColor = gen.unlockColor;
-      moves = 0;
-      history = [];
-      revealedColors = [];
-      if(gen.specialLabel){
-        const msg = gen.specialLabel;
-        setTimeout(()=> showToast(msg), 450);
-      }
+      const g = build(lvl);
+      bottles = g.b; caps = g.cp; locked = g.lk; needColor = g.need;
+      moves = 0; history = [];
+      if(g.label) setTimeout(()=>toast(g.label), 400);
     }
     selected = -1;
-    gameLocked = false;
+    won = false;
     levelNum.textContent = level;
     movesNum.textContent = moves;
     colorsNum.textContent = colors;
     overlay.classList.remove('show');
-    render();
-    saveGame();
+    draw();
+    save();
   }
 
-  function checkStuck(){
-    if(isSolved(bottles)){ stuckBanner.classList.remove('show'); return false; }
-    const hasExposedKey = bottles.some(bt => bt.length>0 && bt[bt.length-1].key);
-    if(hasExposedKey){ stuckBanner.classList.remove('show'); return false; }
-    if(getMoves(bottles, bottleCap, bottleLockedArr).length === 0){
-      stuckBanner.classList.add('show');
-      return true;
-    }
-    const solvable = isSolvable(bottles, 60000, bottleCap, bottleLockedArr);
-    stuckBanner.classList.toggle('show', !solvable);
-    return !solvable;
+  function snapshot(){
+    history.push({ bottles: cloneB(bottles), caps: caps.slice(), locked: locked.slice(), needColor: needColor.slice() });
+    if(history.length > 200) history.shift();
   }
 
-  function pushHistory(){
-    history.push({
-      bottles: cloneState(bottles),
-      caps: bottleCap.slice(),
-      lockedArr: bottleLockedArr.slice(),
-      unlockColor: bottleUnlockColor.slice()
-    });
-  }
-
-  function shakeBottle(i){
-    const slots = board.querySelectorAll('.bottle-slot');
-    if(slots[i]){
-      slots[i].classList.add('shake');
-      setTimeout(()=> slots[i] && slots[i].classList.remove('shake'), 320);
-    }
-  }
-
-  function checkColorLocks(){
-    let unlocked = false;
-    for(let i=0;i<bottleUnlockColor.length;i++){
-      const target = bottleUnlockColor[i];
-      if(target !== null && bottleLockedArr[i] && isColorComplete(bottles, target)){
-        bottleLockedArr[i] = false;
-        bottleUnlockColor[i] = null;
-        unlocked = true;
+  function applySettle(){
+    let opened = false;
+    for(let i=0;i<locked.length;i++){
+      if(locked[i] && needColor[i] !== null && colorDone(bottles, needColor[i])){
+        locked[i] = false; opened = true;
       }
     }
-    if(unlocked){
-      showToast('Color complete — vial unlocked!');
-      saveGame();
-    }
-    return unlocked;
+    if(opened) toast('Color finished — vial unlocked!');
+    return opened;
   }
 
-  function render(){
-    checkColorLocks();
-    board.innerHTML = '';
-    bottles.forEach((b, idx) => {
-      const cap = bottleCap[idx] || CAPACITY;
-      const isLockedBottle = !!bottleLockedArr[idx];
-      const unlockTarget = bottleUnlockColor[idx];
+  let stuckToken = 0;
+
+  function checkStuck(){
+    const tok = ++stuckToken;
+    if(won || solved(bottles, locked)){ stuckBanner.classList.remove('show'); return; }
+    for(let i=0;i<bottles.length;i++){
+      if(bottles[i].length && bottles[i][bottles[i].length-1].k){ stuckBanner.classList.remove('show'); return; }
+    }
+    if(moveList(bottles, caps, locked).length === 0){ stuckBanner.classList.add('show'); return; }
+    const key = sig(bottles, locked) + '/' + caps.join(',');
+    const hit = solveCache.get(key);
+    if(hit !== undefined){ stuckBanner.classList.toggle('show', hit === false); return; }
+    stuckBanner.classList.remove('show');
+    setTimeout(function(){
+      if(tok !== stuckToken) return;
+      const r = solvable(bottles, locked, caps, needColor, 6000);
+      if(solveCache.size > 300) solveCache.clear();
+      solveCache.set(key, r);
+      if(tok === stuckToken) stuckBanner.classList.toggle('show', r === false);
+    }, 24);
+  }
+
+  function draw(){
+    applySettle();
+    const frag = document.createDocumentFragment();
+    for(let idx=0; idx<bottles.length; idx++){
+      const bt = bottles[idx];
+      const cp = caps[idx];
+      const isLocked = locked[idx];
+      const per = cp > CAP ? 26 : 41;
 
       const slot = document.createElement('div');
       slot.className = 'bottle-slot';
-      if(idx === selected) slot.classList.add('selected');
-      if(isLockedBottle) slot.classList.add('locked-slot');
-      const isUniform = b.length>0 && !b[0].key && b.every(u=>u.c===b[0].c);
-      if(isUniform && !isLockedBottle) slot.classList.add('solved');
+      if(idx === selected) slot.className += ' selected';
+      if(isLocked) slot.className += ' locked-slot';
+      let uniform = bt.length > 0 && !bt[0].k;
+      for(let j=1;j<bt.length && uniform;j++) if(bt[j].c !== bt[0].c || bt[j].k) uniform = false;
+      if(uniform && bt.length === cp && !isLocked) slot.className += ' solved';
 
-      const bottleEl = document.createElement('div');
-      bottleEl.className = 'bottle';
-      bottleEl.style.height = Math.round(41*cap) + 'px';
-      if(cap > CAPACITY) bottleEl.classList.add('giant');
+      const el = document.createElement('div');
+      el.className = cp > CAP ? 'bottle giant' : 'bottle';
+      el.style.height = (per * cp) + 'px';
 
-      b.forEach((u, ui) => {
+      for(let j=0;j<bt.length;j++){
+        const u = bt[j];
         const seg = document.createElement('div');
         seg.className = 'segment';
-        seg.style.height = (100/cap) + '%';
-        const isTop = ui === b.length-1;
-        if(u.key){
-          seg.classList.add('key-seg');
+        seg.style.height = (100/cp) + '%';
+        if(u.k){
+          seg.className += ' key-seg';
           seg.textContent = '🔑';
-        } else if(u.m && isTop && !revealedColors.includes(u.c)){
-          revealedColors.push(u.c);
+        } else if(u.m && !u.r){
+          seg.className += ' mystery';
+          seg.textContent = '?';
+        } else {
+          seg.style.background = PALETTE[u.c % PALETTE.length];
         }
-        if(!u.key){
-          const hidden = u.m && !revealedColors.includes(u.c);
-          if(hidden){
-            seg.classList.add('mystery');
-            seg.textContent = '?';
-          } else {
-            seg.style.background = PALETTE[((u.c % PALETTE.length)+PALETTE.length)%PALETTE.length];
-          }
-        }
-        bottleEl.appendChild(seg);
-      });
-
-      if(isLockedBottle){
-        const lockIcon = document.createElement('div');
-        lockIcon.className = 'lock-icon';
-        lockIcon.textContent = '🔒';
-        bottleEl.appendChild(lockIcon);
+        el.appendChild(seg);
       }
 
-      slot.appendChild(bottleEl);
+      if(isLocked){
+        const lock = document.createElement('div');
+        lock.className = 'lock-icon';
+        lock.textContent = '🔒';
+        el.appendChild(lock);
+      }
 
-      if(isLockedBottle){
+      slot.appendChild(el);
+
+      if(isLocked){
         const tag = document.createElement('div');
         tag.className = 'tag';
-        if(unlockTarget !== null){
-          tag.innerHTML = 'Finish <span style="color:'+PALETTE[unlockTarget]+';font-weight:700;">' + COLOR_NAMES[unlockTarget] + '</span>';
+        if(needColor[idx] !== null){
+          tag.innerHTML = 'Finish <b style="color:' + PALETTE[needColor[idx]] + '">' + NAMES[needColor[idx]] + '</b>';
         } else {
-          tag.textContent = 'Locked';
+          tag.textContent = 'Needs key';
         }
         slot.appendChild(tag);
       }
 
-      slot.addEventListener('click', () => handleClick(idx));
-      board.appendChild(slot);
-    });
+      slot.addEventListener('click', function(){ tap(idx); });
+      frag.appendChild(slot);
+    }
+    board.innerHTML = '';
+    board.appendChild(frag);
     checkStuck();
   }
 
-  function useKey(idx){
-    if(gameLocked) return;
-    const lockIdx = bottleLockedArr.findIndex(v => v);
-    pushHistory();
-    bottles[idx] = bottles[idx].slice(0, -1);
-    if(lockIdx !== -1){
-      bottleLockedArr[lockIdx] = false;
-      showToast('Key collected — vial unlocked!');
-    } else {
-      showToast('Key collected!');
-    }
-    selected = -1;
-    render();
-    saveGame();
+  function reveal(idx){
+    const bt = bottles[idx];
+    if(!bt.length) return false;
+    const u = bt[bt.length-1];
+    if(u.m && !u.r){ u.r = true; return true; }
+    return false;
   }
 
-  function handleClick(idx){
-    if(gameLocked) return;
-    const bottle = bottles[idx];
-    const topUnit = bottle.length>0 ? bottle[bottle.length-1] : null;
+  function revealAllTops(){
+    let any = false;
+    for(let i=0;i<bottles.length;i++) if(!locked[i] && reveal(i)) any = true;
+    return any;
+  }
 
-    if(topUnit && topUnit.key){ useKey(idx); return; }
+  function shake(i){
+    const nodes = board.children;
+    if(nodes[i]){
+      nodes[i].classList.add('shake');
+      setTimeout(function(){ if(nodes[i]) nodes[i].classList.remove('shake'); }, 300);
+    }
+  }
 
-    if(bottleLockedArr[idx]){
-      shakeBottle(idx);
-      showToast('Locked — find the key first');
+  function tap(idx){
+    if(won) return;
+    const bt = bottles[idx];
+    const top = bt.length ? bt[bt.length-1] : null;
+
+    if(top && top.k){
+      snapshot();
+      bt.pop();
+      let opened = false;
+      for(let i=0;i<locked.length;i++){
+        if(locked[i] && needColor[i] === null){ locked[i] = false; opened = true; }
+      }
+      selected = -1;
+      revealAllTops();
+      draw();
+      save();
+      toast(opened ? 'Key found — vial unlocked!' : 'Key found!');
+      return;
+    }
+
+    if(locked[idx]){
+      shake(idx);
+      toast(needColor[idx] !== null ? 'Finish ' + NAMES[needColor[idx]] + ' to open this' : 'Find the key to open this');
       return;
     }
 
     if(selected === -1){
-      if(bottle.length === 0) return;
+      if(!bt.length) return;
       selected = idx;
-      render();
+      draw();
       return;
     }
+
     if(selected === idx){
       selected = -1;
-      render();
+      draw();
       return;
     }
 
-    const from = bottles[selected], to = bottles[idx];
-    const cap = bottleCap[idx] || CAPACITY;
-    const canPour = from.length>0 && !from[from.length-1].key && to.length<cap &&
-      (to.length===0 || (!to[to.length-1].key && to[to.length-1].c===from[from.length-1].c));
+    const from = bottles[selected];
+    const fTop = from.length ? from[from.length-1] : null;
+    const dTop = bt.length ? bt[bt.length-1] : null;
+    const can = fTop && !fTop.k && bt.length < caps[idx] && (!dTop || (!dTop.k && dTop.c === fTop.c));
 
-    if(canPour){
-      pushHistory();
-      bottles = applyMove(bottles, selected, idx, bottleCap);
+    if(can){
+      snapshot();
+      bottles = pour(bottles, selected, idx, caps);
       moves++;
       movesNum.textContent = moves;
       selected = -1;
-      render();
-      saveGame();
-      if(isSolved(bottles)){
-        gameLocked = true;
-        setTimeout(showWin, 350);
+      revealAllTops();
+      draw();
+      save();
+      if(solved(bottles, locked)){
+        won = true;
+        setTimeout(win, 320);
       }
     } else {
-      const prevSel = selected;
-      const destUsable = bottle.length > 0 && !bottleLockedArr[idx] && !(bottle[bottle.length-1].key);
-      if(destUsable){
-        selected = idx;
-        render();
-      } else {
-        selected = -1;
-        render();
-      }
-      shakeBottle(prevSel);
+      const prev = selected;
+      selected = (bt.length && !locked[idx] && !(dTop && dTop.k)) ? idx : -1;
+      draw();
+      shake(prev);
     }
   }
 
-  function showWin(){
+  function win(){
     document.getElementById('overlayTitle').textContent = 'Level ' + level + ' complete';
-    document.getElementById('overlayText').textContent = 'Solved in ' + moves + ' move' + (moves===1?'':'s') + '.';
+    document.getElementById('overlayText').textContent = 'Solved in ' + moves + ' move' + (moves === 1 ? '' : 's') + '.';
     overlay.classList.add('show');
   }
 
-  function showToast(msg){
-    const t = document.createElement('div');
-    t.textContent = msg;
-    t.style.cssText = 'position:fixed;bottom:28px;left:50%;transform:translateX(-50%);'+
-      'background:#2E2F34;color:#ECECEE;'+
-      'padding:10px 18px;border-radius:10px;font-family:inherit;'+
-      'font-size:13px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);'+
-      'opacity:0;transition:opacity .25s ease;max-width:80vw;text-align:center;';
-    document.body.appendChild(t);
-    requestAnimationFrame(()=> t.style.opacity='1');
-    setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(), 300); }, 2600);
+  let toastEl = null;
+  let toastTimer = null;
+  function toast(msg){
+    if(!toastEl){
+      toastEl = document.createElement('div');
+      toastEl.style.cssText = 'position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#2E2F34;color:#ECECEE;padding:10px 18px;border-radius:10px;font-family:inherit;font-size:13px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);opacity:0;transition:opacity .25s ease;max-width:82vw;text-align:center;pointer-events:none;';
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg;
+    toastEl.style.opacity = '1';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.style.opacity = '0'; }, 2400);
   }
 
-  // ---------- controls ----------
-
-  exportBtn.addEventListener('click', () => {
-    const data = { level, bottles, colors, moves, history, caps: bottleCap, lockedArr: bottleLockedArr, unlockColor: bottleUnlockColor, revealedColors, exportedAt: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  exportBtn.addEventListener('click', function(){
+    const data = { level, bottles, caps, locked, needColor, colors, moves, history };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'i-hate-ads-save.json';
+    a.download = 'save.json';
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(()=> URL.revokeObjectURL(url), 1000);
-    showToast('Save file downloaded');
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    toast('Save file downloaded');
   });
 
-  importBtn.addEventListener('click', () => importFile.click());
+  importBtn.addEventListener('click', function(){ importFile.click(); });
 
-  importFile.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
+  importFile.addEventListener('change', function(e){
+    const f = e.target.files[0];
+    if(!f) return;
+    const r = new FileReader();
+    r.onload = function(){
       try{
-        const data = normalizeData(JSON.parse(reader.result));
-        if(!data) throw new Error('bad file');
-        startLevel(data.level, data);
-        showToast('Save loaded — Level ' + data.level);
-      }catch(err){
-        showToast('Could not read that save file');
-      }
+        const d = normalize(JSON.parse(r.result));
+        if(!d) throw 0;
+        start(d.level, d);
+        toast('Save loaded — Level ' + d.level);
+      }catch(err){ toast('Could not read that save file'); }
     };
-    reader.readAsText(file);
+    r.readAsText(f);
     importFile.value = '';
   });
 
-  addBottleBtn.addEventListener('click', () => {
-    if(gameLocked) return;
-    pushHistory();
+  addBottleBtn.addEventListener('click', function(){
+    if(won) return;
+    snapshot();
     bottles.push([]);
-    bottleCap.push(CAPACITY);
-    bottleLockedArr.push(false);
-    bottleUnlockColor.push(null);
+    caps.push(CAP);
+    locked.push(false);
+    needColor.push(null);
     selected = -1;
-    render();
-    saveGame();
-    showToast('Empty vial added');
+    draw();
+    save();
+    toast('Empty vial added');
   });
 
-  undoBtn.addEventListener('click', () => {
-    if(gameLocked || history.length===0) return;
-    const prev = history.pop();
-    bottles = prev.bottles;
-    bottleCap = prev.caps;
-    bottleLockedArr = prev.lockedArr;
-    bottleUnlockColor = prev.unlockColor || bottleUnlockColor;
-    moves = Math.max(0, moves-1);
+  undoBtn.addEventListener('click', function(){
+    if(won || !history.length) return;
+    const p = history.pop();
+    bottles = p.bottles;
+    caps = p.caps;
+    locked = p.locked;
+    needColor = p.needColor;
+    moves = Math.max(0, moves - 1);
     movesNum.textContent = moves;
     selected = -1;
-    render();
-    saveGame();
+    draw();
+    save();
   });
 
-  resetBtn.addEventListener('click', () => startLevel(level));
-  nextBtn.addEventListener('click', () => startLevel(level+1));
+  resetBtn.addEventListener('click', function(){ start(level); });
+  nextBtn.addEventListener('click', function(){ start(level + 1); });
 
-  const saved = loadGame();
-  if(saved){
-    startLevel(saved.level, saved);
+  const s = load();
+  if(s){
+    start(s.level, s);
   } else {
-    startLevel(1);
+    let lv = 1;
+    try{
+      const old = JSON.parse(localStorage.getItem('ihateads_save_v1'));
+      if(old && typeof old.level === 'number' && old.level > 0) lv = old.level;
+    }catch(e){}
+    start(lv);
   }
 })();
+
 </script>
 
 </body>
